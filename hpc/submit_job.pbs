@@ -1,0 +1,272 @@
+#!/bin/bash
+# =============================================================================
+# PlanktonAI Training Job — Amrita HPC (GPU via torch118 env)
+# =============================================================================
+
+#PBS -N planktonai_train
+#PBS -q workq
+#PBS -l select=1:ncpus=8:mem=16gb:host=amritahpc
+#PBS -l walltime=48:00:00
+#PBS -j oe
+#PBS -o training.log
+
+set -euo pipefail
+
+# Load CUDA toolkit
+module load cuda11.6/toolkit/11.6.2
+
+# =============================================================================
+# PHASE 0 — Bootstrap
+# =============================================================================
+echo "============================================================"
+echo "PlanktonAI HPC Job"
+echo "Host:       $(hostname)"
+echo "Start time: $(date)"
+echo "Job ID:     ${PBS_JOBID:-local}"
+echo "============================================================"
+
+CODE_DIR="${PBS_O_WORKDIR}"
+cd "${CODE_DIR}"
+
+# Use existing torch118 env
+MAMBA_BIN="${HOME}/.local/bin/micromamba"
+MAMBA_ROOT="${HOME}/micromamba"
+ENV_NAME="torch118"
+PYTHON="${MAMBA_ROOT}/envs/${ENV_NAME}/bin/python3"
+PIP="${MAMBA_ROOT}/envs/${ENV_NAME}/bin/pip"
+export MAMBA_ROOT_PREFIX="${MAMBA_ROOT}"
+
+# =============================================================================
+# PHASE 1 — Verify environment exists
+# =============================================================================
+echo ""
+echo "--- PHASE 1: Environment check ---"
+
+if [ ! -f "${PYTHON}" ]; then
+    echo "ERROR: '${ENV_NAME}' env not found at ${PYTHON}"
+    echo "Create it first on the login node:"
+    echo "  micromamba create -n torch118 python=3.10 -c conda-forge --yes"
+    echo "  micromamba run -n torch118 pip install torch==1.13.1+cu116 torchvision==0.14.1+cu116 --extra-index-url https://download.pytorch.org/whl/cu116"
+    exit 1
+fi
+echo "Environment: ${ENV_NAME} ($(${PYTHON} --version 2>&1))"
+
+# =============================================================================
+# PHASE 2 — Install missing project dependencies into torch118
+# =============================================================================
+echo ""
+echo "--- PHASE 2: Dependencies ---"
+
+if "${PYTHON}" -c "import ultralytics, huggingface_hub, timm, albumentations, torch; assert torch.cuda.is_available()" 2>/dev/null; then
+    echo "All key packages installed and CUDA working."
+else
+    echo "Installing missing project dependencies ..."
+    "${PIP}" install --upgrade pip --quiet
+    # Install everything together with numpy<2 pinned so pip enforces it in one pass
+    "${PIP}" install --prefer-binary --extra-index-url https://download.pytorch.org/whl/cu116 \
+        "torch==1.13.1+cu116" \
+        "torchvision==0.14.1+cu116" \
+        "numpy<2" \
+        "ultralytics>=8.0.100" \
+        "huggingface_hub>=0.19.0" \
+        "opencv-python>=4.8.0" \
+        "Pillow>=9.0.0" \
+        "scipy>=1.7.0" \
+        "scikit-image>=0.19.0" \
+        "scikit-learn>=1.0.0" \
+        "tqdm>=4.64.0" \
+        "pyyaml>=6.0.1" \
+        "matplotlib>=3.5.0" \
+        "seaborn>=0.12.0" \
+        "tifffile>=2023.0.0" \
+        "timm>=1.0.0" \
+        "kornia>=0.7.0" \
+        "albumentations>=1.4.0"
+    echo "Dependencies installed."
+fi
+
+# Always force numpy<2 — ultralytics silently upgrades it as a dependency
+echo "Enforcing numpy<2 for torch 1.13 compatibility ..."
+"${PIP}" install --prefer-binary "numpy<2" --quiet
+
+# Verify numpy version
+"${PYTHON}" -c "
+import numpy as np, sys
+if tuple(int(x) for x in np.__version__.split('.')[:2]) >= (2, 0):
+    print(f'ERROR: numpy {np.__version__} is incompatible with torch 1.13. Aborting.')
+    sys.exit(1)
+print(f'NumPy: {np.__version__} (OK)')
+"
+
+echo "Python: $(${PYTHON} --version 2>&1)"
+"${PYTHON}" -c "import torch; print(f'PyTorch: {torch.__version__}  CUDA: {torch.cuda.is_available()}')"
+
+# =============================================================================
+# PHASE 3 — Read config.py
+# =============================================================================
+echo ""
+echo "--- PHASE 3: Reading config.py ---"
+
+eval $("${PYTHON}" -c "
+import sys
+sys.path.insert(0, '${CODE_DIR}')
+try:
+    import config as c
+except ImportError:
+    print('echo \"ERROR: config.py not found in ${CODE_DIR}\"', flush=True)
+    print('exit 1', flush=True)
+    raise SystemExit(1)
+
+def check(val, name, placeholder):
+    if not val or placeholder in str(val):
+        print(f'echo \"ERROR: {name} not set in config.py\"')
+        print('exit 1')
+        raise SystemExit(1)
+
+token        = getattr(c, 'HF_TOKEN', '')
+dataset_repo = getattr(c, 'HF_DATASET_REPO', '')
+model_repo   = getattr(c, 'HF_MODEL_REPO', '')
+
+check(token,        'HF_TOKEN',        'hf_xxx')
+check(dataset_repo, 'HF_DATASET_REPO', 'yourname')
+check(model_repo,   'HF_MODEL_REPO',   'yourname')
+
+epochs       = getattr(c, 'EPOCHS',           50)
+batch_size   = getattr(c, 'BATCH_SIZE',        16)
+device       = getattr(c, 'DEVICE',          'cpu')
+prune_ratio  = getattr(c, 'PRUNE_RATIO',      0.0)
+prune_struct = 'true' if getattr(c, 'PRUNE_STRUCTURED', False) else 'false'
+prune_epochs = getattr(c, 'PRUNE_EPOCHS',       5)
+
+print(f'HF_TOKEN={token}')
+print(f'HF_DATASET_REPO={dataset_repo}')
+print(f'HF_MODEL_REPO={model_repo}')
+print(f'_CFG_EPOCHS={epochs}')
+print(f'_CFG_BATCH={batch_size}')
+print(f'_CFG_DEVICE={device}')
+print(f'_CFG_PRUNE_RATIO={prune_ratio}')
+print(f'_CFG_PRUNE_STRUCT={prune_struct}')
+print(f'_CFG_PRUNE_EPOCHS={prune_epochs}')
+")
+
+# CLI overrides take priority over config.py
+DEVICE="${DEVICE:-${_CFG_DEVICE}}"
+EPOCHS="${EPOCHS:-${_CFG_EPOCHS}}"
+BATCH_SIZE="${BATCH_SIZE:-${_CFG_BATCH}}"
+PRUNE_RATIO="${_CFG_PRUNE_RATIO}"
+PRUNE_STRUCT="${_CFG_PRUNE_STRUCT}"
+PRUNE_EPOCHS="${_CFG_PRUNE_EPOCHS}"
+
+echo "device=${DEVICE}  epochs=${EPOCHS}  batch=${BATCH_SIZE}"
+echo "prune_ratio=${PRUNE_RATIO}  structured=${PRUNE_STRUCT}"
+echo "dataset: ${HF_DATASET_REPO}"
+echo "model:   ${HF_MODEL_REPO}"
+
+# =============================================================================
+# PHASE 4 — Locate scratch disk and dataset
+# =============================================================================
+echo ""
+echo "--- PHASE 4: Scratch disk ---"
+
+# Use the project-local scratch directory (persistent across jobs, no root needed)
+SCRATCH="${CODE_DIR}/scratch"
+mkdir -p "${SCRATCH}"
+
+AVAIL_KB=$(df -k "${SCRATCH}" | awk 'NR==2 {print $4}')
+AVAIL_GB=$(echo "scale=1; ${AVAIL_KB} / 1048576" | bc)
+echo "Scratch: ${SCRATCH}  (${AVAIL_GB} GB free)"
+
+DATASET_DIR="${SCRATCH}/prepared_dataset"
+
+# =============================================================================
+# PHASE 5 — Prepare Dataset (skip if already exists from a previous job)
+# =============================================================================
+echo ""
+echo "--- PHASE 5: Preparing dataset ---"
+
+if [ -d "${DATASET_DIR}/classification/train" ] && [ -d "${DATASET_DIR}/yolo" ]; then
+    echo "Prepared dataset already exists at ${DATASET_DIR} — skipping preparation."
+else
+    if   [ "${AVAIL_KB}" -ge 10485760 ]; then
+        SAMPLE="1.0"; echo "Tier: FULL (>=10 GB) -> sample=1.0"
+    elif [ "${AVAIL_KB}" -ge  5242880 ]; then
+        SAMPLE="0.6"; echo "Tier: MID  (5-10 GB) -> sample=0.6"
+    else
+        SAMPLE="0.3"; echo "Tier: LOW  (<5 GB)   -> sample=0.3"
+    fi
+
+    "${PYTHON}" -u "${CODE_DIR}/scripts/prepare_dataset.py" \
+        --sample "${SAMPLE}" \
+        --output-dir "${SCRATCH}"
+fi
+
+# Verify dataset integrity before training
+echo ""
+echo "--- Verifying dataset ---"
+YOLO_YAML="${DATASET_DIR}/yolo/data.yaml"
+CLS_TRAIN="${DATASET_DIR}/classification/train"
+CLS_VAL="${DATASET_DIR}/classification/val"
+
+FAIL=0
+if [ ! -f "${YOLO_YAML}" ]; then
+    echo "ERROR: YOLO data.yaml not found at ${YOLO_YAML}"
+    FAIL=1
+fi
+if [ ! -d "${CLS_TRAIN}" ] || [ -z "$(ls -A ${CLS_TRAIN} 2>/dev/null)" ]; then
+    echo "ERROR: Classification train dir missing or empty: ${CLS_TRAIN}"
+    FAIL=1
+fi
+if [ ! -d "${CLS_VAL}" ] || [ -z "$(ls -A ${CLS_VAL} 2>/dev/null)" ]; then
+    echo "ERROR: Classification val dir missing or empty: ${CLS_VAL}"
+    FAIL=1
+fi
+if [ "${FAIL}" -eq 1 ]; then
+    echo "Dataset verification FAILED. Aborting."
+    exit 1
+fi
+
+N_CLASSES=$(ls -d ${CLS_TRAIN}/*/ 2>/dev/null | wc -l)
+N_TRAIN=$(find ${CLS_TRAIN} -type f \( -name '*.jpg' -o -name '*.png' \) | wc -l)
+N_VAL=$(find ${CLS_VAL} -type f \( -name '*.jpg' -o -name '*.png' \) | wc -l)
+echo "Dataset OK: ${N_CLASSES} classes, ${N_TRAIN} train images, ${N_VAL} val images"
+
+# =============================================================================
+# PHASE 6 — Train
+# =============================================================================
+echo ""
+echo "--- PHASE 6: Training ---"
+
+PRUNE_FLAGS=""
+if [ "$(echo "${PRUNE_RATIO} > 0" | bc)" = "1" ]; then
+    PRUNE_FLAGS="--prune-ratio ${PRUNE_RATIO} --prune-epochs ${PRUNE_EPOCHS}"
+    [ "${PRUNE_STRUCT}" = "true" ] && PRUNE_FLAGS="${PRUNE_FLAGS} --prune-structured"
+fi
+
+"${PYTHON}" -u "${CODE_DIR}/scripts/train_models.py" \
+    --mode               both \
+    --data-yaml          "${DATASET_DIR}/yolo/data.yaml" \
+    --classification-dir "${DATASET_DIR}/classification" \
+    --epochs             "${EPOCHS}" \
+    --batch-size         "${BATCH_SIZE}" \
+    --device             "${DEVICE}" \
+    --workers            8 \
+    --no-amp \
+    ${PRUNE_FLAGS}
+
+echo "Training completed at $(date)."
+
+# =============================================================================
+# PHASE 7 — Push weights to HF Hub BEFORE scratch is wiped
+# =============================================================================
+echo ""
+echo "--- PHASE 7: Uploading weights ---"
+
+"${PYTHON}" "${CODE_DIR}/scripts/hf_upload_weights.py" \
+    --run-dir "${CODE_DIR}"
+
+echo ""
+echo "============================================================"
+echo "Job finished at $(date)"
+echo "Weights: https://huggingface.co/${HF_MODEL_REPO}"
+echo "============================================================"
+exit 0

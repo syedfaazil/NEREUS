@@ -1,0 +1,201 @@
+#!/bin/bash
+# =============================================================================
+# PlanktonAI — Phase 2 Job: Pruning + Fine-tune + Upload
+# Run this AFTER submit_job.pbs has finished classifier training.
+#
+# Prerequisites on the HPC node (in CODE_DIR):
+#   models/mobilenetv3_classifier_best.pt   — from the first job
+#   scratch/prepared_dataset/               — dataset must still be present
+#
+# Usage:
+#   qsub hpc/submit_job_2.pbs
+# =============================================================================
+
+#PBS -N planktonai_prune
+#PBS -q workq
+#PBS -l select=1:ncpus=8:mem=16gb:host=amritahpc
+#PBS -l walltime=12:00:00
+#PBS -j oe
+#PBS -o pruning.log
+
+set -euo pipefail
+
+module load cuda11.6/toolkit/11.6.2
+
+# =============================================================================
+# PHASE 0 — Bootstrap
+# =============================================================================
+echo "============================================================"
+echo "PlanktonAI — Pruning + Fine-tune + Upload Job"
+echo "Host:       $(hostname)"
+echo "Start time: $(date)"
+echo "Job ID:     ${PBS_JOBID:-local}"
+echo "============================================================"
+
+CODE_DIR="${PBS_O_WORKDIR}"
+cd "${CODE_DIR}"
+
+MAMBA_BIN="${HOME}/.local/bin/micromamba"
+MAMBA_ROOT="${HOME}/micromamba"
+ENV_NAME="torch118"
+PYTHON="${MAMBA_ROOT}/envs/${ENV_NAME}/bin/python3"
+PIP="${MAMBA_ROOT}/envs/${ENV_NAME}/bin/pip"
+export MAMBA_ROOT_PREFIX="${MAMBA_ROOT}"
+
+# =============================================================================
+# PHASE 1 — Environment check
+# =============================================================================
+echo ""
+echo "--- PHASE 1: Environment check ---"
+
+if [ ! -f "${PYTHON}" ]; then
+    echo "ERROR: torch118 env not found at ${PYTHON}. Aborting."
+    exit 1
+fi
+echo "Environment: ${ENV_NAME} ($(${PYTHON} --version 2>&1))"
+"${PYTHON}" -c "import torch; print(f'PyTorch: {torch.__version__}  CUDA: {torch.cuda.is_available()}')"
+
+# =============================================================================
+# PHASE 2 — Dependencies (fast check, usually cached)
+# =============================================================================
+echo ""
+echo "--- PHASE 2: Dependencies ---"
+
+if "${PYTHON}" -c "import ultralytics, huggingface_hub, timm, albumentations, torch; assert torch.cuda.is_available()" 2>/dev/null; then
+    echo "All packages OK and CUDA working."
+else
+    echo "Re-installing missing packages ..."
+    "${PIP}" install --prefer-binary --extra-index-url https://download.pytorch.org/whl/cu116 \
+        "torch==1.13.1+cu116" \
+        "torchvision==0.14.1+cu116" \
+        "numpy<2" \
+        "ultralytics>=8.0.100" \
+        "huggingface_hub>=0.19.0" \
+        "timm>=1.0.0" \
+        "albumentations>=1.4.0" \
+        --quiet
+fi
+
+# Always enforce numpy<2
+"${PIP}" install --prefer-binary "numpy<2" --quiet
+
+# =============================================================================
+# PHASE 3 — Read config.py
+# =============================================================================
+echo ""
+echo "--- PHASE 3: Reading config.py ---"
+
+eval $("${PYTHON}" -c "
+import sys
+sys.path.insert(0, '${CODE_DIR}')
+try:
+    import config as c
+except ImportError:
+    print('echo \"ERROR: config.py not found\"')
+    print('exit 1')
+    raise SystemExit(1)
+
+def check(val, name, placeholder):
+    if not val or placeholder in str(val):
+        print(f'echo \"ERROR: {name} not set in config.py\"')
+        print('exit 1')
+        raise SystemExit(1)
+
+token        = getattr(c, 'HF_TOKEN', '')
+dataset_repo = getattr(c, 'HF_DATASET_REPO', '')
+model_repo   = getattr(c, 'HF_MODEL_REPO', '')
+
+check(token,        'HF_TOKEN',        'hf_xxx')
+check(dataset_repo, 'HF_DATASET_REPO', 'yourname')
+check(model_repo,   'HF_MODEL_REPO',   'yourname')
+
+batch_size   = getattr(c, 'BATCH_SIZE',        16)
+device       = getattr(c, 'DEVICE',          'cpu')
+prune_ratio  = getattr(c, 'PRUNE_RATIO',      0.3)
+prune_struct = 'true' if getattr(c, 'PRUNE_STRUCTURED', False) else 'false'
+prune_epochs = getattr(c, 'PRUNE_EPOCHS',      10)
+
+print(f'HF_TOKEN={token}')
+print(f'HF_DATASET_REPO={dataset_repo}')
+print(f'HF_MODEL_REPO={model_repo}')
+print(f'_CFG_BATCH={batch_size}')
+print(f'_CFG_DEVICE={device}')
+print(f'_CFG_PRUNE_RATIO={prune_ratio}')
+print(f'_CFG_PRUNE_STRUCT={prune_struct}')
+print(f'_CFG_PRUNE_EPOCHS={prune_epochs}')
+")
+
+BATCH_SIZE="${BATCH_SIZE:-${_CFG_BATCH}}"
+DEVICE="${DEVICE:-${_CFG_DEVICE}}"
+PRUNE_RATIO="${_CFG_PRUNE_RATIO}"
+PRUNE_STRUCT="${_CFG_PRUNE_STRUCT}"
+PRUNE_EPOCHS="${_CFG_PRUNE_EPOCHS}"
+
+echo "device=${DEVICE}  batch=${BATCH_SIZE}"
+echo "prune_ratio=${PRUNE_RATIO}  structured=${PRUNE_STRUCT}  prune_epochs=${PRUNE_EPOCHS}"
+
+# =============================================================================
+# PHASE 4 — Verify prerequisites
+# =============================================================================
+echo ""
+echo "--- PHASE 4: Prerequisite check ---"
+
+SCRATCH="${CODE_DIR}/scratch"
+DATASET_DIR="${SCRATCH}/prepared_dataset"
+CLS_DIR="${DATASET_DIR}/classification"
+BEST_WEIGHTS="${CODE_DIR}/models/mobilenetv3_classifier_best.pt"
+
+FAIL=0
+if [ ! -f "${BEST_WEIGHTS}" ]; then
+    echo "ERROR: Classifier weights not found at ${BEST_WEIGHTS}"
+    echo "       Run submit_job.pbs first and wait for it to complete."
+    FAIL=1
+fi
+if [ ! -d "${CLS_DIR}/train" ] || [ -z "$(ls -A ${CLS_DIR}/train 2>/dev/null)" ]; then
+    echo "ERROR: Classification dataset missing at ${CLS_DIR}/train"
+    echo "       The scratch dataset from the first job must still be present."
+    FAIL=1
+fi
+if [ "${FAIL}" -eq 1 ]; then
+    exit 1
+fi
+
+N_CLASSES=$(ls -d ${CLS_DIR}/train/*/ 2>/dev/null | wc -l)
+echo "Found weights: ${BEST_WEIGHTS}"
+echo "Found dataset: ${CLS_DIR}  (${N_CLASSES} classes)"
+
+# =============================================================================
+# PHASE 5 — Pruning + Fine-tune
+# =============================================================================
+echo ""
+echo "--- PHASE 5: Pruning + Fine-tune ---"
+
+PRUNE_FLAGS="--prune-ratio ${PRUNE_RATIO} --prune-epochs ${PRUNE_EPOCHS}"
+[ "${PRUNE_STRUCT}" = "true" ] && PRUNE_FLAGS="${PRUNE_FLAGS} --prune-structured"
+
+"${PYTHON}" -u "${CODE_DIR}/scripts/prune_only.py" \
+    --classification-dir "${CLS_DIR}" \
+    --weights            "${BEST_WEIGHTS}" \
+    --num-classes        "${N_CLASSES}" \
+    --batch-size         "${BATCH_SIZE}" \
+    --device             "${DEVICE}" \
+    --workers            8 \
+    ${PRUNE_FLAGS}
+
+echo "Pruning completed at $(date)."
+
+# =============================================================================
+# PHASE 6 — Upload weights to HF Hub
+# =============================================================================
+echo ""
+echo "--- PHASE 6: Uploading weights ---"
+
+"${PYTHON}" "${CODE_DIR}/scripts/hf_upload_weights.py" \
+    --run-dir "${CODE_DIR}"
+
+echo ""
+echo "============================================================"
+echo "Job finished at $(date)"
+echo "Pruned weights: https://huggingface.co/${HF_MODEL_REPO}"
+echo "============================================================"
+exit 0

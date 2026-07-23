@@ -1,5 +1,5 @@
 """
-NEREUS Pipeline
+Zooplankton Pipeline
 Complete end-to-end pipeline for zooplankton detection and classification
 """
 
@@ -18,9 +18,9 @@ from detection import YOLODetector
 from classification import MobileNetClassifier
 
 
-class NEREUSPipeline:
+class ZooplanktonPipeline:
     """
-    Complete NEREUS pipeline integrating:
+    Complete Zooplankton pipeline integrating:
     1. Image preprocessing (standardization, enhancement, artifact removal)
     2. Object detection (YOLOv5n)
     3. Species classification (MobileNetV3)
@@ -34,7 +34,7 @@ class NEREUSPipeline:
                  enable_preprocessing: bool = True,
                  enable_watershed: bool = True):
         """
-        Initialize NEREUS pipeline
+        Initialize Zooplankton pipeline
         
         Args:
             detector_path: Path to trained YOLO detector weights

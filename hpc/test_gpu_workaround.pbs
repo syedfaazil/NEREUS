@@ -1,0 +1,31 @@
+#!/bin/bash
+# Workaround: request CPU-only on a GPU node to bypass broken pbs_cgroups
+#PBS -N gpu_test_workaround
+#PBS -q workq
+#PBS -l select=1:ncpus=1:mem=4gb:vnode=node02
+#PBS -l walltime=00:10:00
+#PBS -j oe
+#PBS -o gpu_test_workaround.log
+
+echo "========================================"
+echo "GPU Workaround Test (no ngpus request)"
+echo "Host:       $(hostname)"
+echo "Job ID:     ${PBS_JOBID:-local}"
+echo "========================================"
+
+echo ""
+echo "--- nvidia-smi ---"
+nvidia-smi 2>&1 || echo "nvidia-smi not found on this node"
+
+echo ""
+echo "--- CUDA_VISIBLE_DEVICES ---"
+echo "CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-NOT SET}"
+
+echo ""
+echo "--- ls /dev/nvidia* ---"
+ls -la /dev/nvidia* 2>&1 || echo "No /dev/nvidia* devices found"
+
+echo ""
+echo "========================================"
+echo "Test finished at $(date)"
+echo "========================================"

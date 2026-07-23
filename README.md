@@ -1,10 +1,10 @@
-# NEREUS - Next-gen Embedded Recognition & Enumeration of Underwater Species
+# PlanktonAI - Next-gen Embedded Recognition & Enumeration of Underwater Species
 
 A lightweight, two-stage AI pipeline for real-time zooplankton detection and classification, optimized for edge devices like Raspberry Pi.
 
 ## 🎯 Project Overview
 
-NEREUS automates the counting and classification of underwater species (zooplankton) using state-of-the-art computer vision and deep learning techniques. The system is designed to work with any digital microscope and provides real-time biodiversity intelligence.
+PlanktonAI automates the counting and classification of underwater species (zooplankton) using state-of-the-art computer vision and deep learning techniques. The system is designed to work with any digital microscope and provides real-time biodiversity intelligence.
 
 ### Key Features
 
@@ -55,6 +55,7 @@ Microscope Input → Image Standardization → Image Preprocessing → Object De
 ```
 sih_2025/
 ├── src/
+├── src/
 │   ├── preprocessing/
 │   │   ├── image_standardization.py    # Format conversion
 │   │   ├── image_enhancement.py        # CLAHE, denoising
@@ -65,7 +66,7 @@ sih_2025/
 │   ├── classification/
 │   │   └── mobilenet_classifier.py    # MobileNetV3 classification
 │   └── pipeline/
-│       └── nereus_pipeline.py         # End-to-end pipeline
+│       └── zooplankton_pipeline.py    # End-to-end pipeline
 ├── examples/
 │   └── test_pipeline.py               # Test scripts
 ├── individual_images/                  # Dataset images
@@ -105,11 +106,11 @@ python examples/test_pipeline.py
 ### Basic Usage
 
 ```python
-from src.pipeline import NEREUSPipeline
+from src.pipeline import ZooplanktonPipeline
 import cv2
 
 # Initialize pipeline
-pipeline = NEREUSPipeline(
+pipeline = ZooplanktonPipeline(
     num_classes=127,
     device='cpu',  # or 'cuda' for GPU
     enable_preprocessing=True,
@@ -296,7 +297,7 @@ pipeline.export_results(results, 'output.json', format='json')
 ```
 
 ### Darwin Core / OBIS
-(To be implemented based on specific requirements)
+(To be implemented )
 
 ## 🔬 Biodiversity Indices
 
@@ -327,4 +328,4 @@ The pipeline automatically calculates:
 
 ---
 
-**NEREUS** - Bringing AI-powered biodiversity monitoring to the edge!
+**PlanktonAI** - Bringing AI-powered biodiversity monitoring to the edge! 🌊🔬🤖

@@ -1,0 +1,45 @@
+#!/bin/bash
+# Quick GPU allocation test — should finish in under 1 minute
+#PBS -N gpu_test
+#PBS -q workq
+#PBS -l select=1:ncpus=1:mem=4gb:ngpus=1
+#PBS -l walltime=00:10:00
+#PBS -j oe
+#PBS -o gpu_test.log
+
+echo "========================================"
+echo "GPU Allocation Test"
+echo "Host:       $(hostname)"
+echo "Job ID:     ${PBS_JOBID:-local}"
+echo "Start time: $(date)"
+echo "========================================"
+
+echo ""
+echo "--- nvidia-smi ---"
+nvidia-smi || echo "FAIL: nvidia-smi not found or no GPU allocated"
+
+echo ""
+echo "--- CUDA_VISIBLE_DEVICES ---"
+echo "CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-NOT SET}"
+
+echo ""
+echo "--- Python CUDA check ---"
+python3 -c "
+import torch
+print(f'PyTorch version:  {torch.__version__}')
+print(f'CUDA available:   {torch.cuda.is_available()}')
+print(f'CUDA device count:{torch.cuda.device_count()}')
+if torch.cuda.is_available():
+    print(f'GPU name:         {torch.cuda.get_device_name(0)}')
+    print(f'GPU memory:       {torch.cuda.get_device_properties(0).total_mem / 1e9:.1f} GB')
+    x = torch.randn(1000, 1000, device='cuda')
+    y = x @ x
+    print(f'MatMul test:      PASSED (result shape: {y.shape})')
+else:
+    print('FAIL: CUDA not available to PyTorch')
+" 2>&1 || echo "WARN: python3/torch not available — check nvidia-smi output above"
+
+echo ""
+echo "========================================"
+echo "Test finished at $(date)"
+echo "========================================"

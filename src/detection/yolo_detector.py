@@ -1,5 +1,5 @@
 """
-YOLOv5n Detector Module
+YOLO26n Detector Module
 Lightweight object detection for zooplankton specimens
 """
 
@@ -13,7 +13,7 @@ from ultralytics import YOLO
 
 class YOLODetector:
     """
-    YOLOv5n-based detector for zooplankton specimens
+    YOLO26n-based detector for zooplankton specimens
     Optimized for Raspberry Pi deployment
     """
     
@@ -39,8 +39,8 @@ class YOLODetector:
         if model_path is not None and Path(model_path).exists():
             self.model = YOLO(model_path)
         else:
-            # Use YOLOv5n pretrained model as starting point
-            self.model = YOLO('yolov5n.pt')
+            # Use YOLO26n pretrained model as starting point
+            self.model = YOLO('yolo26n.pt')
         
         # Set device
         self.model.to(device)
@@ -254,9 +254,11 @@ class YOLODetector:
              imgsz: int = 640,
              batch_size: int = 16,
              project: str = 'runs/train',
-             name: str = 'zooplankton_detector'):
+             name: str = 'zooplankton_detector',
+             workers: int = 8,
+             amp: bool = True):
         """
-        Train YOLOv5n model on custom dataset
+        Train YOLO26n model on custom dataset
         
         Args:
             data_yaml: Path to data configuration YAML
@@ -265,6 +267,8 @@ class YOLODetector:
             batch_size: Training batch size
             project: Project directory
             name: Experiment name
+            workers: Number of dataloader workers
+            amp: Use Automatic Mixed Precision
         """
         results = self.model.train(
             data=data_yaml,
@@ -274,10 +278,11 @@ class YOLODetector:
             project=project,
             name=name,
             device=self.device,
-            workers=4,
+            workers=workers,
             patience=50,
             save=True,
-            plots=True
+            plots=True,
+            amp=amp
         )
         
         return results
@@ -311,7 +316,7 @@ class YOLODetector:
             Dictionary with model information
         """
         info = {
-            'model_type': 'YOLOv5n',
+            'model_type': 'YOLO26n',
             'input_size': self.input_size,
             'device': self.device,
             'conf_threshold': self.conf_threshold,

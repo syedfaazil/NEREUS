@@ -1,0 +1,34 @@
+#!/bin/bash
+# =============================================================================
+# PlanktonAI — Upload YOLO weights to Hugging Face Hub
+# Usage: qsub hpc/upload_yolo.pbs
+# =============================================================================
+
+#PBS -N planktonai_yolo_upload
+#PBS -q workq
+#PBS -l select=1:ncpus=1:mem=2gb:host=amritahpc
+#PBS -l walltime=00:30:00
+#PBS -j oe
+#PBS -o upload_yolo.log
+
+set -euo pipefail
+
+CODE_DIR="${PBS_O_WORKDIR}"
+cd "${CODE_DIR}"
+
+MAMBA_ROOT="${HOME}/micromamba"
+ENV_NAME="torch118"
+PYTHON="${MAMBA_ROOT}/envs/${ENV_NAME}/bin/python3"
+
+echo "============================================================"
+echo "PlanktonAI — YOLO Weight Upload"
+echo "Host:       $(hostname)"
+echo "Start time: $(date)"
+echo "============================================================"
+
+"${PYTHON}" "${CODE_DIR}/scripts/upload_yolo_only.py" \
+    --run-dir "${CODE_DIR}"
+
+echo ""
+echo "Done at $(date)"
+exit 0

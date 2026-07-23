@@ -1,0 +1,49 @@
+#!/bin/bash
+
+# --- Job Configuration ---
+#PBS -N zooplankton_preprocessing
+#PBS -q workq
+#PBS -l select=1:ncpus=4
+#PBS -j oe
+#PBS -o preprocessing.log
+#PBS -l software=python
+
+# --- Setup Environment ---
+cd $PBS_O_WORKDIR
+
+echo "Starting preprocessing job on $(hostname) at $(date)"
+echo "Working directory: $(pwd)"
+
+# Load Python
+module load python3/python3
+echo "Python version: $(python3 --version)"
+
+# --- Run Preprocessing ---
+echo "----------------------------------------"
+echo "Applying Image Enhancement & Artifact Removal"
+echo "----------------------------------------"
+
+# Upgrade pip first (crucial for older python envs)
+echo "Upgrading pip..."
+python3 -m pip install --user --upgrade pip
+
+# Install dependencies for Python 3.6
+echo "Installing dependencies from requirements_hpc.txt..."
+python3 -m pip install --user -r requirements_hpc.txt
+
+# Run the script
+# It will read 'individual_images' and create 'individual_images_preprocessed'
+# Using apply_preprocessing.py as it exists in the repo
+python3 -u scripts/apply_preprocessing.py
+
+if [ $? -eq 0 ]; then
+    echo "Preprocessing completed successfully."
+else
+    echo "Preprocessing failed."
+    exit 1
+fi
+
+echo "----------------------------------------"
+echo "Job finished at $(date)"
+echo "----------------------------------------"
+exit 0

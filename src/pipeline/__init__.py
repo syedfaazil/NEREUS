@@ -1,8 +1,8 @@
 """
-NEREUS Pipeline Module
+Zooplankton Pipeline Module
 End-to-end pipeline integrating preprocessing, detection, and classification
 """
 
-from .nereus_pipeline import NEREUSPipeline
+from .zooplankton_pipeline import ZooplanktonPipeline
 
-__all__ = ['NEREUSPipeline']
+__all__ = ['ZooplanktonPipeline']

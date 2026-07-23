@@ -101,8 +101,7 @@ class WatershedSegmenter:
         local_max = peak_local_max(
             distance,
             min_distance=self.min_distance,
-            labels=binary,
-            footprint=np.ones((3, 3))
+            labels=binary
         )
         
         # Create markers for watershed

@@ -6,7 +6,6 @@ Applies CLAHE, denoising, and other enhancement techniques
 import numpy as np
 import cv2
 from typing import Optional, Tuple
-from skimage import exposure, restoration
 
 
 class ImageEnhancer:

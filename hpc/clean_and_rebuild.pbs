@@ -1,0 +1,185 @@
+#!/bin/bash
+# =============================================================================
+# PlanktonAI — Clean scratch, redownload dataset, and re-prepare
+#
+# Usage:
+#   qsub hpc/clean_and_rebuild.pbs
+#
+# What this does:
+#   1. Wipes the scratch/prepared_dataset directory
+#   2. Deletes old individual_images.zip from scratch
+#   3. Removes the old prepared dataset archive from HF Hub
+#   4. Re-downloads individual_images.zip from HF Hub
+#   5. Re-prepares the dataset (classification + detection)
+# =============================================================================
+
+#PBS -N planktonai_rebuild
+#PBS -q workq
+#PBS -l select=1:ncpus=8:mem=16gb:host=amritahpc
+#PBS -l walltime=06:00:00
+#PBS -j oe
+#PBS -o rebuild.log
+
+set -euo pipefail
+
+module load cuda11.6/toolkit/11.6.2
+
+# ── Paths ─────────────────────────────────────────────────────────────────────
+CODE_DIR="${PBS_O_WORKDIR}"
+cd "${CODE_DIR}"
+
+MAMBA_ROOT="${HOME}/micromamba"
+ENV_NAME="torch118"
+PYTHON="${MAMBA_ROOT}/envs/${ENV_NAME}/bin/python3"
+PIP="${MAMBA_ROOT}/envs/${ENV_NAME}/bin/pip"
+export MAMBA_ROOT_PREFIX="${MAMBA_ROOT}"
+
+SCRATCH="${CODE_DIR}/scratch"
+
+echo "============================================================"
+echo "PlanktonAI — Clean & Rebuild Dataset"
+echo "Host:       $(hostname)"
+echo "Start time: $(date)"
+echo "Job ID:     ${PBS_JOBID:-local}"
+echo "Scratch:    ${SCRATCH}"
+echo "============================================================"
+
+# ── Ensure numpy<2 ────────────────────────────────────────────────────────────
+"${PIP}" install --prefer-binary "numpy<2" --quiet 2>/dev/null
+
+# =============================================================================
+# STEP 1 — Wipe scratch
+# =============================================================================
+echo ""
+echo "--- STEP 1: Wiping scratch directory ---"
+
+if [ -d "${SCRATCH}" ]; then
+    echo "Removing all contents of: ${SCRATCH}"
+    rm -rf "${SCRATCH}"/*
+    echo "Done."
+else
+    echo "No scratch directory found."
+fi
+
+# Also clean old YOLO runs to avoid stale weights
+if [ -d "${CODE_DIR}/runs" ]; then
+    echo "Removing old training runs: ${CODE_DIR}/runs"
+    rm -rf "${CODE_DIR}/runs"
+fi
+
+echo "Scratch is clean."
+ls -la "${SCRATCH}" 2>/dev/null || echo "(scratch dir empty or removed)"
+
+# =============================================================================
+# STEP 2 — Remove old dataset from HF Hub (optional)
+# =============================================================================
+echo ""
+echo "--- STEP 2: Cleaning HF Hub dataset ---"
+
+"${PYTHON}" -c "
+import sys
+sys.path.insert(0, '${CODE_DIR}')
+try:
+    import config as c
+    repo = getattr(c, 'HF_DATASET_REPO', '')
+    token = getattr(c, 'HF_TOKEN', '')
+except ImportError:
+    print('config.py not found, skipping HF cleanup')
+    sys.exit(0)
+
+if not repo or not token:
+    print('HF_DATASET_REPO or HF_TOKEN not set, skipping')
+    sys.exit(0)
+
+try:
+    from huggingface_hub import HfApi
+    api = HfApi()
+    api.token = token
+
+    # List and delete old prepared dataset files
+    files = api.list_repo_files(repo_id=repo, repo_type='dataset')
+    old_files = [f for f in files if 'prepared_dataset' in f]
+    if old_files:
+        for f in old_files:
+            print(f'  Deleting from HF Hub: {f}')
+            api.delete_file(path_in_repo=f, repo_id=repo, repo_type='dataset', token=token)
+        print(f'Removed {len(old_files)} old prepared dataset file(s).')
+    else:
+        print('No old prepared_dataset files found on HF Hub.')
+except Exception as e:
+    print(f'HF cleanup skipped: {e}')
+"
+
+# =============================================================================
+# STEP 3 — Re-download individual_images.zip
+# =============================================================================
+echo ""
+echo "--- STEP 3: Downloading dataset ---"
+
+mkdir -p "${SCRATCH}"
+
+"${PYTHON}" -c "
+import sys
+sys.path.insert(0, '${CODE_DIR}')
+import config as c
+
+from huggingface_hub import hf_hub_download, login
+if c.HF_TOKEN:
+    login(token=c.HF_TOKEN, add_to_git_credential=False)
+
+print(f'Downloading individual_images.zip from {c.HF_DATASET_REPO} ...')
+path = hf_hub_download(
+    repo_id=c.HF_DATASET_REPO,
+    repo_type='dataset',
+    filename='individual_images.zip',
+    local_dir='${SCRATCH}'
+)
+print(f'Downloaded to: {path}')
+"
+
+# =============================================================================
+# STEP 4 — Re-prepare dataset
+# =============================================================================
+echo ""
+echo "--- STEP 4: Preparing dataset ---"
+
+"${PYTHON}" -u "${CODE_DIR}/scripts/prepare_dataset.py" \
+    --sample 1.0 \
+    --output-dir "${SCRATCH}"
+
+# =============================================================================
+# STEP 5 — Verify
+# =============================================================================
+echo ""
+echo "--- STEP 5: Verifying dataset ---"
+
+DATASET_DIR="${SCRATCH}/prepared_dataset"
+CLS_TRAIN="${DATASET_DIR}/classification/train"
+CLS_VAL="${DATASET_DIR}/classification/val"
+YOLO_YAML="${DATASET_DIR}/yolo/data.yaml"
+
+FAIL=0
+[ ! -f "${YOLO_YAML}" ] && echo "ERROR: data.yaml missing" && FAIL=1
+[ ! -d "${CLS_TRAIN}" ] && echo "ERROR: classification/train missing" && FAIL=1
+[ ! -d "${CLS_VAL}" ] && echo "ERROR: classification/val missing" && FAIL=1
+
+if [ "${FAIL}" -eq 1 ]; then
+    echo "Dataset verification FAILED."
+    exit 1
+fi
+
+N_CLASSES=$(ls -d ${CLS_TRAIN}/*/ 2>/dev/null | wc -l)
+N_TRAIN=$(find ${CLS_TRAIN} -type f \( -name '*.jpg' -o -name '*.png' \) | wc -l)
+N_VAL=$(find ${CLS_VAL} -type f \( -name '*.jpg' -o -name '*.png' \) | wc -l)
+echo "Dataset OK: ${N_CLASSES} classes, ${N_TRAIN} train images, ${N_VAL} val images"
+
+DISK_USAGE=$(du -sh "${SCRATCH}" | cut -f1)
+echo "Total scratch usage: ${DISK_USAGE}"
+
+echo ""
+echo "============================================================"
+echo "Rebuild completed at $(date)"
+echo "You can now submit the training job:"
+echo "  qsub hpc/submit_job.pbs"
+echo "============================================================"
+exit 0

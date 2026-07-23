@@ -1,0 +1,108 @@
+#!/bin/bash
+# =============================================================================
+# PlanktonAI — Clean up scratch and HF Hub dataset
+#
+# Usage:
+#   qsub hpc/cleanup.pbs
+#
+# What this does:
+#   1. Wipes the scratch directory (prepared_dataset, individual_images.zip, etc.)
+#   2. Removes old training runs
+#   3. Removes the old prepared dataset archive from HF Hub
+# =============================================================================
+
+#PBS -N planktonai_cleanup
+#PBS -q workq
+#PBS -l select=1:ncpus=2:mem=4gb:host=amritahpc
+#PBS -l walltime=00:30:00
+#PBS -j oe
+#PBS -o cleanup.log
+
+set -euo pipefail
+
+# ── Paths ─────────────────────────────────────────────────────────────────────
+CODE_DIR="${PBS_O_WORKDIR}"
+cd "${CODE_DIR}"
+
+MAMBA_ROOT="${HOME}/micromamba"
+ENV_NAME="torch118"
+PYTHON="${MAMBA_ROOT}/envs/${ENV_NAME}/bin/python3"
+export MAMBA_ROOT_PREFIX="${MAMBA_ROOT}"
+
+SCRATCH="${CODE_DIR}/scratch"
+
+echo "============================================================"
+echo "PlanktonAI — Cleanup Job"
+echo "Host:       $(hostname)"
+echo "Start time: $(date)"
+echo "Job ID:     ${PBS_JOBID:-local}"
+echo "Scratch:    ${SCRATCH}"
+echo "============================================================"
+
+# =============================================================================
+# STEP 1 — Wipe scratch
+# =============================================================================
+echo ""
+echo "--- STEP 1: Wiping scratch directory ---"
+
+if [ -d "${SCRATCH}" ]; then
+    echo "Removing all contents of: ${SCRATCH}"
+    rm -rf "${SCRATCH}"/*
+    echo "Done."
+else
+    echo "No scratch directory found."
+fi
+
+# Also clean old YOLO runs to avoid stale weights
+if [ -d "${CODE_DIR}/runs" ]; then
+    echo "Removing old training runs: ${CODE_DIR}/runs"
+    rm -rf "${CODE_DIR}/runs"
+fi
+
+echo "Scratch and runs directories are clean."
+
+# =============================================================================
+# STEP 2 — Remove old dataset from HF Hub
+# =============================================================================
+echo ""
+echo "--- STEP 2: Cleaning HF Hub dataset ---"
+
+"${PYTHON}" -c "
+import sys
+sys.path.insert(0, '${CODE_DIR}')
+try:
+    import config as c
+    repo = getattr(c, 'HF_DATASET_REPO', '')
+    token = getattr(c, 'HF_TOKEN', '')
+except ImportError:
+    print('config.py not found, skipping HF cleanup')
+    sys.exit(0)
+
+if not repo or not token:
+    print('HF_DATASET_REPO or HF_TOKEN not set, skipping')
+    sys.exit(0)
+
+try:
+    from huggingface_hub import HfApi
+    api = HfApi()
+    api.token = token
+
+    # List and delete old prepared dataset files
+    files = api.list_repo_files(repo_id=repo, repo_type='dataset')
+    old_files = [f for f in files if 'prepared_dataset' in f]
+    if old_files:
+        for f in old_files:
+            print(f'  Deleting from HF Hub: {f}')
+            api.delete_file(path_in_repo=f, repo_id=repo, repo_type='dataset', token=token)
+        print(f'Removed {len(old_files)} old prepared dataset file(s).')
+    else:
+        print('No old prepared_dataset files found on HF Hub.')
+except Exception as e:
+    print(f'HF cleanup skipped: {e}')
+"
+
+echo ""
+echo "============================================================"
+echo "Cleanup completed at $(date)"
+echo "============================================================"
+exit 0

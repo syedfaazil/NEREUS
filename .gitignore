@@ -1,14 +1,70 @@
-individual_images
+# ── Dataset & Large Files ─────────────────────────────────────────
+individual_images/
+individual_images_preprocessed/
+individual_images.zip
+prepared_dataset/
+prepared_dataset.tar.gz
+sih_2025_code_only.zip
 
+# ── Credentials (NEVER commit) ────────────────────────────────────
+config.py
+
+# ── Model Weights ─────────────────────────────────────────────────
+*.pt
+*.pth
+*.tflite
+*.onnx
+models/
+
+# ── Training Runs ─────────────────────────────────────────────────
+runs/
+
+# ── Logs ──────────────────────────────────────────────────────────
+*.log
+training.log
+preprocessing.log
+install_log.txt
+
+# ── Python ────────────────────────────────────────────────────────
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+.venv_wsl/
+venv/
+*.egg-info/
+dist/
+build/
+
+# ── Data files (checked into repo separately) ─────────────────────
 taxonomy_descriptor_zooscan.csv
-
 dataset_descriptor_zooscan.csv
 
-prepared_dataset
-yolov5nu.pt
-yolo11n.pt
-src\classification\__pycache__
-src\detection\__pycache__
-src\pipeline\__pycache__
-src\preprocessing\__pycache__
-runs
+# ── HPC / Colab scratch ───────────────────────────────────────────
+colab_*.ipynb
+
+# ── OS / Editor ───────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.swp
+
+# ── Archives & Deployment Bundles ────────────────────────────────
+*.zip
+*.tar.gz
+hpc_deployment/
+
+# ── Docs binaries (PDFs, scraped HTML) ───────────────────────────
+docs/*.pdf
+docs/*.html
+docs/*_files/
+
+# ── One-off utility / upload scripts ─────────────────────────────
+scripts/hf_upload_weights.py
+scripts/upload_hf.py
+scripts/upload_prepared.py
+scripts/upload_yolo_only.py
+scripts/upload_zip.py
+scripts/zip_code.py
+scripts/fix_line_endings.py

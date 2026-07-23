@@ -79,7 +79,11 @@ class ArtifactRemover:
         Returns:
             Image with bubbles removed
         """
-        # Threshold image
+        # Threshold image.
+        # ZooScan images: dark specimens on a WHITE background.
+        # THRESH_BINARY: background (bright) → 255, specimens (dark) → 0.
+        # Bubbles are bright circular rings that also threshold to 255 —
+        # so they appear in the binary and circularity check correctly catches them.
         _, binary = cv2.threshold(image, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         
         # Find contours

@@ -1,5 +1,5 @@
 """
-Object Detection module for NEREUS pipeline
+Object Detection module for Zooplankton pipeline
 YOLOv5n-based detection of zooplankton specimens
 """
 

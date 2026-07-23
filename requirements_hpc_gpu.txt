@@ -1,0 +1,41 @@
+# =============================================================================
+# requirements_hpc_gpu.txt — For Amrita HPC (NVIDIA Driver 510, CUDA 11.6)
+#
+# PyTorch 1.13.1+cu116 is the latest version supporting CUDA 11.6
+# =============================================================================
+
+# Deep Learning — CUDA 11.6 compatible (install FIRST via --extra-index-url)
+--extra-index-url https://download.pytorch.org/whl/cu116
+torch==1.13.1+cu116
+torchvision==0.14.1+cu116
+
+# YOLO — pin to version compatible with torch 1.13
+ultralytics>=8.0.100,<8.3.0
+
+# Core Dependencies
+numpy>=1.21.0,<2.0.0
+opencv-python>=4.8.0
+Pillow>=9.0.0
+scipy>=1.7.0
+scikit-image>=0.19.0
+
+# Microscope Format Support
+tifffile>=2023.0.0
+
+# Image Processing
+scikit-learn>=1.0.0
+pandas>=1.3.0
+
+# Utilities
+tqdm>=4.64.0
+pyyaml>=6.0.1
+matplotlib>=3.5.0
+seaborn>=0.12.0
+
+# HF Hub for model upload/download
+huggingface_hub>=0.19.0
+
+# Advanced Architecture & Augmentation
+timm>=1.0.0
+kornia>=0.7.0
+albumentations>=1.4.0

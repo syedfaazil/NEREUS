@@ -1,0 +1,58 @@
+#!/bin/bash
+# Test GPU using the confirmed working pattern from Amrita HPC
+#PBS -N gpu_test_v2
+#PBS -q workq
+#PBS -l select=1:ncpus=1:mem=8gb:host=amritahpc
+#PBS -l walltime=00:10:00
+#PBS -j oe
+#PBS -o gpu_test_v2.log
+
+module load cuda11.6/toolkit/11.6.2
+cd ${PBS_O_WORKDIR}
+
+echo "========================================"
+echo "GPU Test v2 (module load + host=amritahpc)"
+echo "Host:       $(hostname)"
+echo "Job ID:     ${PBS_JOBID:-local}"
+echo "========================================"
+
+echo ""
+echo "--- nvidia-smi ---"
+nvidia-smi
+
+echo ""
+echo "--- CUDA env ---"
+echo "CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-NOT SET}"
+echo "CUDA_HOME=${CUDA_HOME:-NOT SET}"
+nvcc --version 2>&1 || echo "nvcc not found"
+
+echo ""
+echo "--- Test with torch118 env ---"
+micromamba run -n torch118 python -c "
+import torch
+print(f'PyTorch:        {torch.__version__}')
+print(f'CUDA available: {torch.cuda.is_available()}')
+print(f'CUDA version:   {torch.version.cuda}')
+if torch.cuda.is_available():
+    print(f'GPU:            {torch.cuda.get_device_name(0)}')
+    x = torch.randn(2048, 2048, device='cuda')
+    y = x @ x
+    print(f'MatMul test:    PASSED')
+    print(f'GPU memory used:{torch.cuda.max_memory_allocated()/1e9:.2f} GB')
+else:
+    print('FAIL: CUDA not available')
+" 2>&1
+
+echo ""
+echo "--- Test with planktonai env ---"
+micromamba run -n planktonai python -c "
+import torch
+print(f'PyTorch:        {torch.__version__}')
+print(f'CUDA available: {torch.cuda.is_available()}')
+print(f'CUDA version:   {torch.version.cuda}')
+" 2>&1
+
+echo ""
+echo "========================================"
+echo "Finished at $(date)"
+echo "========================================"

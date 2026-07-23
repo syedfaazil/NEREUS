@@ -1,5 +1,5 @@
 """
-Example script to test the NEREUS pipeline
+Example script to test the Zooplankton pipeline
 """
 
 import sys
@@ -10,18 +10,18 @@ import numpy as np
 # Add src to path
 sys.path.append(str(Path(__file__).parent.parent / 'src'))
 
-from pipeline import NEREUSPipeline
+from pipeline import ZooplanktonPipeline
 
 
 def test_single_image():
     """Test pipeline on a single image"""
     print("=" * 50)
-    print("Testing NEREUS Pipeline - Single Image")
+    print("Testing Zooplankton Pipeline - Single Image")
     print("=" * 50)
     
     # Initialize pipeline
     print("\n1. Initializing pipeline...")
-    pipeline = NEREUSPipeline(
+    pipeline = ZooplanktonPipeline(
         num_classes=127,
         device='cpu',
         enable_preprocessing=True,
@@ -196,7 +196,7 @@ def test_classification():
 
 if __name__ == '__main__':
     print("\n" + "=" * 50)
-    print("NEREUS Pipeline Test Suite")
+    print("Zooplankton Pipeline Test Suite")
     print("=" * 50)
     
     # Run all tests

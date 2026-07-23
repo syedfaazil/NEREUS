@@ -1,5 +1,5 @@
 """
-Image preprocessing module for NEREUS pipeline
+Image preprocessing module for Zooplankton pipeline
 Handles format standardization, enhancement, and artifact removal
 """
 

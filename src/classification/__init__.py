@@ -1,8 +1,8 @@
 """
-Species Classification module for NEREUS pipeline
-MobileNetV3-based classification of zooplankton species
+Species Classification module for Zooplankton pipeline
+MobileNetV4-based classification of zooplankton species
 """
 
-from .mobilenet_classifier import MobileNetClassifier
+from .mobilenet_classifier import MobileNetClassifier, TwoStageBinaryFilter, FocalLoss
 
-__all__ = ['MobileNetClassifier']
+__all__ = ['MobileNetClassifier', 'TwoStageBinaryFilter', 'FocalLoss']

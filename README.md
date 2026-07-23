@@ -327,4 +327,4 @@ The pipeline automatically calculates:
 
 ---
 
-**NEREUS** - Bringing AI-powered biodiversity monitoring to the edge! 🌊🔬🤖
+**NEREUS** - Bringing AI-powered biodiversity monitoring to the edge!
